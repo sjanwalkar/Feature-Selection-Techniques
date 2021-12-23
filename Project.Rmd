@@ -1,0 +1,163 @@
+---
+title: "App.Stats-Project"
+output: word_document
+---
+
+```{r}
+rm(list = ls())
+# Installing packages & library
+if (!require('MASS')) install.packages('MASS');
+if (!require('corrplot')) install.packages('corrplot');
+if (!require('leaps')) install.packages('leaps');
+if (!require('car')) install.packages('car');
+library(corrplot)
+library(MASS)
+library(leaps)
+library(car)
+```
+
+```{r}
+# Reading the data
+
+linthrust_data = read.table("C:/Users/sachi/Documents/R_datafiles/LINTHALL.txt", sep = "\t", header = TRUE)
+linthrust_data = linthrust_data[1:45,4:18]
+
+
+# Part I
+ols_model = lm(BIO~., data = linthrust_data)
+summary(ols_model)
+
+matrix=cor(linthrust_data[,2:15])
+corrplot(matrix)
+```
+
+```{r}
+eigen1 = eigen(matrix)
+eigen_values = eigen1$values
+eigen_vectors = eigen1$vectors
+sum(1/eigen_values)
+# As the sum of reciprocals of eigen value is 195.9633 >5*14(predictor variables) collinearity is present in data
+
+kappas = sqrt(eigen_values[1]/eigen_values)  # condition indices
+kappas[length(kappas)]    # condition number
+sum(kappas>15)            # sets of collinearity
+```
+
+```{r}
+# Part II
+pca_model = prcomp(linthrust_data, scale. = TRUE)
+
+var_explained = pca_model$sdev^2 / sum(pca_model$sdev^2)
+plot(var_explained, xlab="PC", ylab = "Proportion of variance explained", ylim = c(0,1), type='b', main='Screen plot')
+# we will only consider first 11 PC's as the proportion of variance explained from the 12th PC is very less.
+s = 'Y~C1'
+dfx_scaled = scale(linthrust_data[,2:15])
+V = pca_model$rotation[2:15,2:15]
+C = data.frame(as.matrix(dfx_scaled)%*%V)
+C$Y =scale(linthrust_data$BIO)
+names(C)= c('C1','C2','C3','C4','C5','C6','C7','C8','C9','C10','C11','C12','C13','C14','Y')
+p =14
+theta_mat= matrix(nrow=p, ncol=(2+p))
+i=1
+while (i<=p) {
+  pcr = lm(as.formula(paste(s,'-1')), data = C)
+  alpha = as.matrix(pcr$coefficients)
+  theta = V[,1:i]%*%alpha
+  r2 = summary(pcr)$r.squared
+  theta_mat[i,1]=i
+  theta_mat[i,2]=r2
+  theta_mat[i,3:(p+2)]=theta
+  s= paste(s,sprintf('+C%d',i+1))
+  i= i+1
+  }
+theta_mat =as.data.frame(theta_mat)
+names(theta_mat) = c('ncomp','R^2',paste('theta',1:p,sep=''))
+theta_mat
+# We will consider first 11 PC as after that there is barely any change/ increase in R^2.
+
+# Calculation of Betas from PC's
+pcr.full=lm(Y~.-1, data = C)
+alpha=pcr.full$coefficients
+theta = V%*%alpha
+sy= sqrt(sum((linthrust_data$BIO-mean(linthrust_data$BIO))^2))
+beta = theta* (sd(linthrust_data$BIO)/apply(linthrust_data[,2:15],2,sd))
+x_bar_beats=0
+for (i in 1:14) {
+  b=sum(beta[i]*mean(linthrust_data[,i+1]))
+  x_bar_beats = b+x_bar_beats
+}
+
+beta_0 = mean(linthrust_data$BIO) - x_bar_beats
+print(beta_0)
+beta
+```
+
+
+```{r}
+# Part III
+linth_data = read.table("C:/Users/sachi/Documents/R_datafiles/LINTH-5.txt", sep = "\t", header = TRUE)
+linth_data = linth_data[,4:9]
+
+
+#1] Stepwise Regression
+full.model <- lm(BIO ~., data = linth_data)
+# Model with 1 feature
+model1_sal = lm(BIO~SAL, data = linth_data)
+model1_pH = lm(BIO~pH, data = linth_data)
+model1_k = lm(BIO~K, data = linth_data)
+model1_Na = lm(BIO~Na, data = linth_data)
+model1_Zn = lm(BIO~Zn, data = linth_data)
+# Single variable model Summary
+summary(model1_sal)
+summary(model1_pH)
+summary(model1_k)
+summary(model1_Na)
+summary(model1_Zn)
+
+```
+As the p-value of pH feature is the smallest it's the most significant variable hence it will be added as the first feature into our model
+BIO ~ pH
+```{r}
+# Model with 2 feature 1st feature is pH 
+model2_sal = lm(BIO~pH+SAL, data = linth_data)
+model2_k = lm(BIO~pH+K, data = linth_data)
+model2_Na = lm(BIO~pH+Na, data = linth_data)
+model2_Zn = lm(BIO~pH+Zn, data = linth_data)
+# 2 variable model Summary
+summary(model2_sal)
+summary(model2_k)
+summary(model2_Na)
+summary(model2_Zn)
+
+```
+As the P-value of Na feature is the smallest, the model containing ph+ Na is the most significant and thus this model will be considered
+BIO~ pH + Na
+```{r}
+# model with 3 features BIO~ Ph+ Na+ 3RD FEATURE
+model3_sal = lm(BIO~pH+Na+SAL, data = linth_data)
+model3_k = lm(BIO~pH+Na+K, data = linth_data)
+model3_Zn = lm(BIO~pH+Na+Zn, data = linth_data)
+# 3 variable model Summary
+summary(model3_sal)
+summary(model3_k)
+summary(model3_Zn)
+
+```
+As it can be seem from the summary by adding 3rd variable, the 3rd feature is not significant even for 0.15 significance level.
+Hence the final model as only 2 features, BIO~ pH + Na
+```{r}
+#2]Best Subset
+subset_model = regsubsets(BIO~., data = linth_data,, nbest = 10, method = "exhaustive", nvmax = 2)
+with(summary(subset_model), data.frame(rsq, adjr2, cp, rss, outmat))
+# By looking at the summary table Adj_R^2 and Cp values, we can narrow it down to 2 models
+# BIO~ pH + Na   & BIO ~  pH + K as their Cp values are close to the the number of features+1(p+1) and they have highest Adj_R^2
+
+# Breaking the tie with VIF.
+vif(model2_Na)  # BIO~ pH + Na
+vif(model2_k)   # bio~ PH + k
+# As we can see, Since VIF values of features pH and Na are higher that pH+K also Cp value of model with
+# pH+ K is equal to 3 that equals p+1 but on the other hand Cp value of pH and Na is closer to 2.
+# Hence we can proceed with model with 2 features pH +k as there is barely any difference in the R^2 value
+# BIO~ ph + k
+```
+
